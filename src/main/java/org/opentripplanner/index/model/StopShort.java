@@ -17,7 +17,6 @@ public class StopShort {
     public String name;
     public double lat;
     public double lon;
-    public String url;
     public String cluster;
 
     /** Distance to the stop when it is returned from a location-based query. */
@@ -29,7 +28,6 @@ public class StopShort {
         name = stop.getName();
         lat = stop.getLat();
         lon = stop.getLon();
-        url = stop.getUrl();
         cluster = stop.getParentStation(); // TODO harmonize these names, maybe use "station" everywhere
     }
 
