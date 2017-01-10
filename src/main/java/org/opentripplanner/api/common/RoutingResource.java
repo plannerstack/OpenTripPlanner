@@ -350,6 +350,7 @@ public abstract class RoutingResource {
     @QueryParam("maxHours")
     private Double maxHours;
 
+
     @QueryParam("disableAlertFiltering")
     private Boolean disableAlertFiltering;
 
