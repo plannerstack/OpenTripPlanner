@@ -14,14 +14,12 @@
 package org.opentripplanner.routing.algorithm;
 
 import junit.framework.TestCase;
-import org.onebusaway.gtfs.model.AgencyAndId;
 import org.onebusaway.gtfs.model.calendar.CalendarServiceData;
 import org.opentripplanner.ConstantsForTests;
 import org.opentripplanner.gtfs.GtfsContext;
 import org.opentripplanner.gtfs.GtfsLibrary;
 import org.opentripplanner.routing.core.Fare;
 import org.opentripplanner.routing.core.Fare.FareType;
-import org.opentripplanner.routing.core.FareComponent;
 import org.opentripplanner.routing.core.Money;
 import org.opentripplanner.routing.core.RoutingRequest;
 import org.opentripplanner.routing.core.WrappedCurrency;
@@ -34,7 +32,6 @@ import org.opentripplanner.routing.spt.ShortestPathTree;
 import org.opentripplanner.util.TestUtils;
 
 import java.io.File;
-import java.util.List;
 
 public class TestFares extends TestCase {
 
@@ -154,6 +151,7 @@ public class TestFares extends TestCase {
         
     }
 
+<<<<<<< HEAD
     public void testFareComponent() throws Exception {
         Graph gg = new Graph();
         GtfsContext context = GtfsLibrary.readGtfs(new File(ConstantsForTests.FARE_COMPONENT_GTFS));
