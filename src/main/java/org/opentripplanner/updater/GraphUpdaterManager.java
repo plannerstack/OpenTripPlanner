@@ -13,12 +13,14 @@
 
 package org.opentripplanner.updater;
 
-import com.beust.jcommander.internal.Lists;
+import com.amazonaws.util.json.JSONException;
+import com.amazonaws.util.json.JSONObject;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Maps;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+
+import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -28,34 +30,35 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
 import org.opentripplanner.routing.graph.Graph;
+import org.opentripplanner.updater.stoptime.TimetableSnapshotSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * This class is attached to the graph:
- * 
+ *
  * <pre>
  * GraphUpdaterManager updaterManager = graph.getUpdaterManager();
  * </pre>
- * 
+ *
  * Each updater will run in its own thread. When changes to the graph have to be made by these
  * updaters, this should be done via the execute method of this manager to prevent race conditions
  * between graph write operations.
- * 
+ *
  */
 public class GraphUpdaterManager {
 
     private static Logger LOG = LoggerFactory.getLogger(GraphUpdaterManager.class);
-    
+
     /**
      * Text used for naming threads when the graph lacks a routerId.
      */
     private static String DEFAULT_ROUTER_ID = "(default)";
-    
+
     /**
      * Thread factory used to create new threads.
      */
-    
+
     private ThreadFactory threadFactory;
 
     /**
@@ -80,22 +83,25 @@ public class GraphUpdaterManager {
      * Parent graph of this manager
      */
     Graph graph;
+    TimetableSnapshotSource snapshot;
+    ObjectMapper mapper = new ObjectMapper();
 
     /**
      * Constructor
-     * 
+     *
      * @param graph is parent graph of manager
      */
     public GraphUpdaterManager(Graph graph) {
         this.graph = graph;
-        
+
         String routerId = graph.routerId;
         if(routerId == null || routerId.isEmpty())
             routerId = DEFAULT_ROUTER_ID;
-        
+
         threadFactory = new ThreadFactoryBuilder().setNameFormat("GraphUpdater-" + routerId + "-%d").build();
         scheduler = Executors.newSingleThreadScheduledExecutor(threadFactory);
         updaterPool = Executors.newCachedThreadPool(threadFactory);
+
     }
 
     public void stop() {
@@ -134,7 +140,7 @@ public class GraphUpdaterManager {
 
     /**
      * Adds an updater to the manager and runs it immediately in its own thread.
-     * 
+     *
      * @param updater is the updater to add and run
      */
     public void addUpdater(final GraphUpdater updater) {
@@ -160,7 +166,7 @@ public class GraphUpdaterManager {
      * This is the method to use to modify the graph from the updaters. The runnables will be
      * scheduled after each other, guaranteeing that only one of these runnables will be active at
      * any time.
-     * 
+     *
      * @param runnable is a graph writer runnable
      */
     public void execute(GraphWriterRunnable runnable) {
@@ -171,11 +177,11 @@ public class GraphUpdaterManager {
      * This is another method to use to modify the graph from the updaters. It behaves like execute,
      * but blocks until the runnable has been executed. This might be particularly useful in the 
      * setup method of an updater.
-     * 
+     *
      * @param runnable is a graph writer runnable
      * @throws ExecutionException
      * @throws InterruptedException
-     * @see GraphUpdaterManager.execute
+     * //@see GraphUpdaterManager.execute
      */
     public void executeBlocking(GraphWriterRunnable runnable) throws InterruptedException,
             ExecutionException {
@@ -186,7 +192,7 @@ public class GraphUpdaterManager {
     }
 
     private Future<?> executeReturningFuture(final GraphWriterRunnable runnable) {
-        // TODO: check for high water mark?
+        // TODO: check for high water mark?  kada ostane mnogo praznih polja posle brisanja 14841
         Future<?> future = scheduler.submit(new Runnable() {
             @Override
             public void run() {
@@ -203,15 +209,18 @@ public class GraphUpdaterManager {
 
     public int size() {
         return updaterList.size();
+
     }
 
     /**
      * Just an example of fetching status information from the graph updater manager to expose it in a web service.
      * More useful stuff should be added later.
+     * @return All stream addresses
      */
-    public Map<Integer, String> getUpdaterDescriptions () {
-        Map<Integer, String> ret = Maps.newTreeMap();
+    private Map<Integer, String> getAllStreamAddresses() {
+        Map<Integer, String> ret = new HashMap<>();
         int i = 0;
+
         for (GraphUpdater updater : updaterList) {
             ret.put(i++, updater.toString());
         }
@@ -219,11 +228,209 @@ public class GraphUpdaterManager {
     }
 
     /**
+     * @return correct and all stream addresses
+     */
+    public String getStreamAddresses() {
+        try {
+            Map<String, Object> combined = new HashMap<>();
+            combined.put("Correct stream addresses", graph.getCorrectStreamAddresses());
+            combined.put("All stream addresses", getAllStreamAddresses());
+            return mapper.writeValueAsString(combined);
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+            return "Something went wrong with Json.";
+        }
+    }
+
+    /**
+     *
+     * @return most of the important data
+     */
+    //TODO 14841 Extract ObjectMapper related code to one method
+    public String getDescription() {
+        TimetableSnapshotSource snap = graph.timetableSnapshotSource;
+        try {
+            return mapper.writeValueAsString(snap);
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+            return "Something went wrong with Json.";
+        }
+    }
+
+
+    /**
      * Just an example of fetching status information from the graph updater manager to expose it in a web service.
      * More useful stuff should be added later.
      */
-    public GraphUpdater getUpdater (int id) {
-        if (id >= updaterList.size()) return null;
-        return updaterList.get(id);
+    public String getUpdater(int id) {
+        String ret = "Updater does not exist.";
+        if (id < updaterList.size())
+            ret = updaterList.get(id).toString();
+        try {
+            return mapper.writeValueAsString(ret);
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+            return "Something went wrong with Json.";
+        }
+    }
+
+    /**
+     * @param id of GraphUpdater whose type is required
+     * @return type of GraphUpdater
+     */
+    public String getType(int id) {
+        GraphUpdater updater = null;
+        if (id < updaterList.size())
+            updater = updaterList.get(id);
+
+        try {
+            return mapper.writeValueAsString(updater==null?"No updater.":updater.getClass().toString());
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+            return "Something went wrong with Json.";
+        }
+    }
+
+    /**
+     * @return all types of updaters
+     */
+    public String getAllTypes() {
+        HashMap<Integer, String> retVal = new HashMap<>();
+        int i = 0;
+        for (GraphUpdater up : updaterList)
+            retVal.put(i++, up.getClass().getName());
+        try {
+            return mapper.writeValueAsString(retVal);
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+            return "Something went wrong with Json.";
+        }
+    }
+
+
+    /**
+     * @return all received updates
+     */
+    public String getReceived() {
+        TimetableSnapshotSource snap = graph.timetableSnapshotSource;
+        try {
+            return mapper.writeValueAsString(snap.getReceived());
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+            return "Something went wrong with Json.";
+        }
+    }
+
+    /**
+     * @return all applied updates
+     */
+
+    public String getApplied() {
+        TimetableSnapshotSource snap = graph.timetableSnapshotSource;
+        try {
+            return mapper.writeValueAsString(snap.getApplied());
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+            return "Something went wrong with Json.";
+        }
+    }
+
+    /**
+     * @return all non-applied updates
+     */
+
+    public String getErrors() {
+        TimetableSnapshotSource snap = graph.timetableSnapshotSource;
+        try {
+            return mapper.writeValueAsString(snap.getErrors());
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+            return "Something went wrong with Json.";
+        }
+    }
+
+    public String getUpdatesTypes() {
+        TimetableSnapshotSource snap = graph.timetableSnapshotSource;
+        try {
+            return mapper.writeValueAsString(snap.getTypes());
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+            return "Something went wrong with Json.";
+        }
+
+    }
+
+    //TODO 14841 String representation of time
+    public String getLastApplied() {
+        TimetableSnapshotSource snap = graph.timetableSnapshotSource;
+        try {
+            return mapper.writeValueAsString(snap.getLastUpdate());
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+            return "Something went wrong with Json.";
+        }
+
+    }
+
+    //TODO 14841
+    public String getLastReceived() {
+
+        TimetableSnapshotSource snap = graph.timetableSnapshotSource;
+        try {
+            return mapper.writeValueAsString(snap.getLastReceived());
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+            return "Something went wrong with Json.";
+        }
+
+    }
+
+
+    //TODO 14841
+    public List<String> getAppliedPerFeed(int feedId) {
+        return null;
+    }
+
+    //TODO 14841 what is tripId
+    public List<String> getTypeAppliedPerFeedPerTrip(int feedId, int tripId) {
+        return null;
+    }
+
+    //TODO 14841 what is stream
+    public List<String> getTotalPerStream() {
+        return null;
+    }
+
+    //TODO 14841 think of something
+    public List<String> getSomethingNew() {
+
+
+        return null;
+    }
+
+    //TODO 14841
+    public String getUpdates() {
+        return null;
+    }
+
+
+    //TODO 14841
+    public String getAgency(String feedId) {
+        try {
+            return mapper.writeValueAsString(graph.getAgencies(feedId));
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+            return "Something went wrong with Json.";
+        }
+    }
+
+    public String getAppliedLastMinutes(int minutes) {
+        TimetableSnapshotSource snap = graph.timetableSnapshotSource;
+        try {
+            return mapper.writeValueAsString(snap.getAppliedLastMinutes(minutes));
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+            return "Something went wrong with Json.";
+        }
     }
 }

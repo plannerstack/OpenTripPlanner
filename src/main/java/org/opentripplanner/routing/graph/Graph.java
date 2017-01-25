@@ -116,6 +116,8 @@ public class Graph implements Serializable {
 
     public final Deduplicator deduplicator = new Deduplicator();
 
+    private static Set<String> correctStreamAddresses = new HashSet<>();
+
     /**
      * Map from GTFS ServiceIds to integers close to 0. Allows using BitSets instead of Set<Object>.
      * An empty Map is created before the Graph is built to allow registering IDs from multiple feeds.   
@@ -1033,7 +1035,7 @@ public class Graph implements Serializable {
      *
      * This speeds up calculation, but problem is that median needs to have all of latitudes/longitudes
      * in memory, this can become problematic in large installations. It works without a problem on New York State.
-     * @see GraphEnvelope
+     * //@see GraphEnvelope
      */
     public void calculateTransitCenter() {
         if (hasTransit) {
@@ -1069,5 +1071,13 @@ public class Graph implements Serializable {
 
     public long getTransitServiceEnds() {
         return transitServiceEnds;
+    }
+
+    public Set<String> getCorrectStreamAddresses() {
+        return correctStreamAddresses;
+    }
+
+    public void addCorrectStreamAddress(String correctStreamAddress) {
+        correctStreamAddresses.add(correctStreamAddress);
     }
 }

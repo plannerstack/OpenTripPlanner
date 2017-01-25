@@ -178,7 +178,7 @@ public class WebsocketGtfsRealtimeUpdater implements GraphUpdater {
                 // Decode message
                 feedMessage = FeedMessage.PARSER.parseFrom(message);
                 feedEntityList = feedMessage.getEntityList();
-                
+
                 // Change fullDataset value if this is an incremental update
                 if (feedMessage.hasHeader()
                         && feedMessage.getHeader().hasIncrementality()
@@ -186,7 +186,7 @@ public class WebsocketGtfsRealtimeUpdater implements GraphUpdater {
                                 .equals(GtfsRealtime.FeedHeader.Incrementality.DIFFERENTIAL)) {
                     fullDataset = false;
                 }
-                
+
                 // Create List of TripUpdates
                 updates = new ArrayList<TripUpdate>(feedEntityList.size());
                 for (FeedEntity feedEntity : feedEntityList) {

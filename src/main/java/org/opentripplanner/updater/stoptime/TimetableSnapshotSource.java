@@ -13,16 +13,25 @@
 
 package org.opentripplanner.updater.stoptime;
 
+import java.sql.Timestamp;
 import java.text.ParseException;
-import java.util.ArrayList;
-import java.util.BitSet;
-import java.util.Calendar;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TimeZone;
+import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collector;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.lucene.util.fst.PairOutputs;
+import org.geotools.xml.xsi.XSISimpleTypes;
+import org.joda.time.DateTime;
 import org.onebusaway.gtfs.model.Agency;
 import org.onebusaway.gtfs.model.AgencyAndId;
 import org.onebusaway.gtfs.model.Route;
@@ -43,7 +52,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Maps;
 import com.google.transit.realtime.GtfsRealtime.TripDescriptor;
 import com.google.transit.realtime.GtfsRealtime.TripUpdate;
 import com.google.transit.realtime.GtfsRealtime.TripUpdate.StopTimeUpdate;
@@ -66,6 +74,7 @@ public class TimetableSnapshotSource {
      */
     private static final long MAX_ARRIVAL_DEPARTURE_TIME = 48 * 60 * 60;
 
+    @JsonIgnore
     public int logFrequency = 2000;
 
     private int appliedBlockCount = 0;
@@ -75,6 +84,7 @@ public class TimetableSnapshotSource {
      * snapshot, just return the same one. Throttles the potentially resource-consuming task of
      * duplicating a TripPattern -> Timetable map and indexing the new Timetables.
      */
+    @JsonIgnore
     public int maxSnapshotFrequency = 1000; // msec
 
     /**
@@ -100,7 +110,10 @@ public class TimetableSnapshotSource {
      */
     private final TripPatternCache tripPatternCache = new TripPatternCache();
 
-    /** Should expired realtime data be purged from the graph. */
+    /**
+     * Should expired realtime data be purged from the graph.
+     */
+    @JsonIgnore
     public boolean purgeExpiredData = true;
 
     protected ServiceDate lastPurgeDate = null;
@@ -113,7 +126,26 @@ public class TimetableSnapshotSource {
 
     private final Agency dummyAgency;
 
+    @JsonIgnore
     public GtfsRealtimeFuzzyTripMatcher fuzzyTripMatcher;
+
+
+    private final List<String> errorList = new ArrayList<>();
+    private final List<String> appliedList = new ArrayList<>();
+    private final List<String> receivedList = new ArrayList<String>();
+    private final List<String> typeList = new ArrayList<>();
+    private final List<AppliedEntity> appliedSpecList = new ArrayList<>();
+
+    // public static Map<String, AppliedEntity> appliedSpecMap = new HashMap<>();
+    public static Map<String, Long> errorMap = new HashMap<>();
+    public static Map<String, Long> appliedMap = new HashMap<>();
+    public static Map<String, Long> receivedMap = new HashMap<>();
+    public static Map<String, Long> typeMap = new HashMap<>();
+
+    private static Timestamp lastUpdate;
+    private static Timestamp lastReceived;
+
+    private Runnable runnable;
 
     public TimetableSnapshotSource(final Graph graph) {
         timeZone = graph.getTimeZone();
@@ -123,14 +155,16 @@ public class TimetableSnapshotSource {
         dummyAgency = new Agency();
         dummyAgency.setId("");
         dummyAgency.setName("");
+
     }
 
     /**
      * @return an up-to-date snapshot mapping TripPatterns to Timetables. This snapshot and the
-     *         timetable objects it references are guaranteed to never change, so the requesting
-     *         thread is provided a consistent view of all TripTimes. The routing thread need only
-     *         release its reference to the snapshot to release resources.
+     * timetable objects it references are guaranteed to never change, so the requesting
+     * thread is provided a consistent view of all TripTimes. The routing thread need only
+     * release its reference to the snapshot to release resources.
      */
+    @JsonIgnore
     public TimetableSnapshot getTimetableSnapshot() {
         TimetableSnapshot snapshotToReturn;
 
@@ -170,21 +204,23 @@ public class TimetableSnapshotSource {
     /**
      * Method to apply a trip update list to the most recent version of the timetable snapshot. A
      * GTFS-RT feed is always applied against a single static feed (indicated by feedId).
-<<<<<<< HEAD
-     * 
-=======
-     *
+     * <<<<<<< HEAD
+     * <p>
+     * =======
+     * <p>
      * However, multi-feed support is not completed and we currently assume there is only one static
      * feed when matching IDs.
+     * <p>
+     * >>>>>>> 7296be8ffd532a13afb0bec263a9f436ab787022
      *
->>>>>>> 7296be8ffd532a13afb0bec263a9f436ab787022
-     * @param graph graph to update (needed for adding/changing stop patterns)
+     * @param graph       graph to update (needed for adding/changing stop patterns)
      * @param fullDataset true iff the list with updates represent all updates that are active right
-     *        now, i.e. all previous updates should be disregarded
-     * @param updates GTFS-RT TripUpdate's that should be applied atomically
+     *                    now, i.e. all previous updates should be disregarded
+     * @param updates     GTFS-RT TripUpdate's that should be applied atomically
      * @param feedId
      */
     public void applyTripUpdates(final Graph graph, final boolean fullDataset, final List<TripUpdate> updates, final String feedId) {
+
         if (updates == null) {
             LOG.warn("updates is null");
             return;
@@ -192,7 +228,7 @@ public class TimetableSnapshotSource {
 
         // Acquire lock on buffer
         bufferLock.lock();
-
+        lastReceived = new Timestamp(System.currentTimeMillis());
         try {
             if (fullDataset) {
                 // Remove all updates from the buffer
@@ -201,7 +237,10 @@ public class TimetableSnapshotSource {
 
             LOG.debug("message contains {} trip updates", updates.size());
             int uIndex = 0;
+
             for (TripUpdate tripUpdate : updates) {
+
+                receivedList.add(tripUpdate.getTrip().getTripId());
                 if (fuzzyTripMatcher != null && tripUpdate.hasTrip()) {
                     final TripDescriptor trip = fuzzyTripMatcher.match(feedId, tripUpdate.getTrip());
                     tripUpdate = tripUpdate.toBuilder().setTrip(trip).build();
@@ -209,6 +248,7 @@ public class TimetableSnapshotSource {
 
                 if (!tripUpdate.hasTrip()) {
                     LOG.warn("Missing TripDescriptor in gtfs-rt trip update: \n{}", tripUpdate);
+                    errorList.add("Missing TripDescriptor in gtfs-rt trip update:  " + tripUpdate);
                     continue;
                 }
 
@@ -220,6 +260,7 @@ public class TimetableSnapshotSource {
                         serviceDate = ServiceDate.parseString(tripDescriptor.getStartDate());
                     } catch (final ParseException e) {
                         LOG.warn("Failed to parse start date in gtfs-rt trip update: \n{}", tripUpdate);
+                        errorList.add("Failed to parse start date in gtfs-rt trip update: " + tripUpdate);
                         continue;
                     }
                 } else {
@@ -256,14 +297,23 @@ public class TimetableSnapshotSource {
 
                 if (applied) {
                     appliedBlockCount++;
+                    lastUpdate = new Timestamp(System.currentTimeMillis());
+                    appliedList.add(tripUpdate.getTrip().getTripId());
+                    typeList.add(tripScheduleRelationship.toString());
+                    appliedSpecList.add(new AppliedEntity(tripScheduleRelationship.toString(), feedId, tripUpdate.getTrip().getTripId()));
+
                 } else {
                     LOG.warn("Failed to apply TripUpdate.");
                     LOG.trace(" Contents: {}", tripUpdate);
+                    errorList.add("Failed to apply TripUpdate. ");// + tripUpdate.getTrip().getTripId() + ".");
+
                 }
 
                 if (appliedBlockCount % logFrequency == 0) {
                     LOG.info("Applied {} trip updates.", appliedBlockCount);
+
                 }
+
             }
             LOG.debug("end of update message");
 
@@ -276,11 +326,124 @@ public class TimetableSnapshotSource {
             } else {
                 getTimetableSnapshot(false);
             }
+
+            if (runnable == null) {
+                runnable = new Runnable() {
+                    public void run() {
+                        LOG.info("Updating Maps.");
+
+                        errorMap = mergeMaps(toMap(errorList), errorMap);
+                        appliedMap = mergeMaps(toMap(appliedList), appliedMap);
+                        receivedMap = mergeMaps(toMap(receivedList), receivedMap);
+                        typeMap = mergeMaps(toMap(typeList), typeMap);
+
+                        removeExpired(appliedSpecList, 60);
+
+                        errorList.clear();
+                        appliedList.clear();
+                        typeList.clear();
+                        receivedList.clear();
+
+                    }
+                };
+                ScheduledExecutorService service = Executors
+                        .newSingleThreadScheduledExecutor();
+                service.scheduleWithFixedDelay(runnable, 1, 1, TimeUnit.MINUTES);
+            }
+
+
         } finally {
             // Always release lock
             bufferLock.unlock();
         }
     }
+
+    /**
+     * @param list that represents errors or updates
+     * @return Map which will group the same messages, and count the same occurrences
+     */
+    static public Map<String, Long> toMap(List<String> list) {
+        if (list == null || list.size() == 0)
+            return null;
+        return list.stream().collect(Collectors.groupingBy(s -> s, Collectors.counting()));
+    }
+
+    static public Map<String, Map<FeedTrip, Set<AppliedEntity>>> toMap2(List<AppliedEntity> list) {
+        if (list == null || list.size() == 0)
+            return null;
+        return list.stream().collect(Collectors.groupingBy(AppliedEntity::getType, Collectors.groupingBy(AppliedEntity::getFeedTrip, Collectors.toSet())));
+    }
+
+    static public Map<String, Map<FeedTrip, Long>> toMap2Number(List<AppliedEntity> list) {
+        if (list == null || list.size() == 0)
+            return null;
+        return list.stream().collect(Collectors.groupingBy(AppliedEntity::getType, Collectors.groupingBy(AppliedEntity::getFeedTrip, Collectors.counting())));
+    }
+
+    static public Map<String, Long> toMap(List<AppliedEntity> list, String type) {
+
+        if (list == null || list.size() == 0)
+            return null;
+        switch (type) {
+            case "feedId":
+                return list.stream().collect(Collectors.groupingBy(AppliedEntity::getFeedId, Collectors.counting()));
+            case "tripId":
+                return list.stream().collect(Collectors.groupingBy(AppliedEntity::getTripId, Collectors.counting()));
+            case "type":
+                return list.stream().collect(Collectors.groupingBy(AppliedEntity::getType, Collectors.counting()));
+            default:
+                LOG.error("Wrong parameter for Generating Map.");
+                return null;
+        }
+    }
+
+    /**
+     * @param firstMap
+     * @param secondMap
+     * @return Map which will group the same messages, and count the same occurrences
+     */
+    static public Map<String, Long> mergeMaps(Map<String, Long> firstMap, Map<String, Long> secondMap) {
+        if (firstMap == null)
+            return secondMap;
+        else if (secondMap == null)
+            return firstMap;
+        Map<String, Long> result = Stream.concat(firstMap.entrySet().stream(), secondMap.entrySet().stream())
+                .collect(Collectors.toMap(
+                        entry -> entry.getKey(), // The key
+                        entry -> entry.getValue(), // The value
+                        // The "merger" as a method reference
+                        (a, b) -> a + b
+                        )
+                );
+        return result;
+    }
+
+    static void removeExpired(List<AppliedEntity> c, long minutes) {
+        if (c == null)
+            return;
+        Timestamp expirationDate = new Timestamp(System.currentTimeMillis() - minutes * 1000 * 60);
+
+        for (Iterator<AppliedEntity> it = c.iterator(); it.hasNext(); )
+            if (((AppliedEntity) it.next()).getTimestamp().before(expirationDate))
+                it.remove();
+
+    }
+
+    @JsonIgnore
+    private List<AppliedEntity> getSelected(int minutes){
+        if (appliedSpecList == null)
+            return null;
+        ArrayList<AppliedEntity> c  = new ArrayList<AppliedEntity>(appliedSpecList);
+
+        Timestamp expirationDate = new Timestamp(System.currentTimeMillis() - minutes * 1000 * 60);
+
+        for (Iterator<AppliedEntity> it = c.iterator(); it.hasNext(); )
+            if (((AppliedEntity) it.next()).getTimestamp().before(expirationDate))
+                it.remove();
+
+        return c;
+    }
+
 
     /**
      * Determine how the trip update should be handled.
@@ -306,7 +469,7 @@ public class TimetableSnapshotSource {
                     final StopTimeUpdate.ScheduleRelationship stopScheduleRelationship = stopTimeUpdate
                             .getScheduleRelationship();
                     if (stopScheduleRelationship.equals(StopTimeUpdate.ScheduleRelationship.SKIPPED)
-                            // TODO: uncomment next line when StopTimeUpdate.ScheduleRelationship.ADDED exists
+                        // TODO: uncomment next line when StopTimeUpdate.ScheduleRelationship.ADDED exists
 //                            || stopScheduleRelationship.equals(StopTimeUpdate.ScheduleRelationship.ADDED)
                             ) {
                         hasModifiedStops = true;
@@ -364,7 +527,7 @@ public class TimetableSnapshotSource {
      * @return true iff successful
      */
     private boolean validateAndHandleAddedTrip(final Graph graph, final TripUpdate tripUpdate,
-            final String feedId, final ServiceDate serviceDate) {
+                                               final String feedId, final ServiceDate serviceDate) {
         // Preconditions
         Preconditions.checkNotNull(graph);
         Preconditions.checkNotNull(tripUpdate);
@@ -552,7 +715,7 @@ public class TimetableSnapshotSource {
      * @return true iff successful
      */
     private boolean handleAddedTrip(final Graph graph, final TripUpdate tripUpdate, final List<Stop> stops,
-            final String feedId, final ServiceDate serviceDate) {
+                                    final String feedId, final ServiceDate serviceDate) {
         // Preconditions
         Preconditions.checkNotNull(stops);
         Preconditions.checkArgument(tripUpdate.getStopTimeUpdateCount() == stops.size(),
@@ -623,8 +786,8 @@ public class TimetableSnapshotSource {
      * @return true iff successful
      */
     private boolean addTripToGraphAndBuffer(final String feedId, final Graph graph, final Trip trip,
-            final TripUpdate tripUpdate, final List<Stop> stops, final ServiceDate serviceDate,
-            final RealTimeState realTimeState) {
+                                            final TripUpdate tripUpdate, final List<Stop> stops, final ServiceDate serviceDate,
+                                            final RealTimeState realTimeState) {
 
         // Preconditions
         Preconditions.checkNotNull(stops);
@@ -740,7 +903,7 @@ public class TimetableSnapshotSource {
      */
     private boolean cancelScheduledTrip(String feedId, String tripId, final ServiceDate serviceDate) {
         boolean success = false;
-        
+
         final TripPattern pattern = getPatternForTripId(feedId, tripId);
 
         if (pattern != null) {
@@ -879,7 +1042,7 @@ public class TimetableSnapshotSource {
      * @return true iff successful
      */
     private boolean handleModifiedTrip(final Graph graph, final Trip trip, final TripUpdate tripUpdate, final List<Stop> stops,
-            final String feedId, final ServiceDate serviceDate) {
+                                       final String feedId, final ServiceDate serviceDate) {
         // Preconditions
         Preconditions.checkNotNull(stops);
         Preconditions.checkArgument(tripUpdate.getStopTimeUpdateCount() == stops.size(),
@@ -938,7 +1101,7 @@ public class TimetableSnapshotSource {
     }
 
     /**
-     * Retrieve a trip pattern given a feed id and trid id.
+     * Retrieve a trip pattern given a feed id and trip id.
      *
      * @param feedId feed id for the trip id
      * @param tripId trip id without agency
@@ -986,4 +1149,175 @@ public class TimetableSnapshotSource {
         return stop;
     }
 
+
+    public Map<String, Long> getErrors() {
+        return errorMap;
+    }
+
+    public Map<String, Long> getApplied() {
+        return appliedMap;
+    }
+
+    public Map<String, Long> getReceived() {
+        return receivedMap;
+    }
+
+    public Map<String, Long> getTypes() {
+        return typeMap;
+    }
+
+    public Map<String, Long> getAppliedPerFeed() {
+        return toMap(appliedSpecList, "feedId");
+    }
+
+    public Map<String, Long> getAppliedPerTrip() {
+        return toMap(appliedSpecList, "tripId");
+    }
+
+    public Map<String, Long> getAppliedPerType() {
+        return toMap(appliedSpecList, "type");
+    }
+
+    public Map<String, Map<FeedTrip, Set<AppliedEntity>>> getAppliedTypePerFeedPerTrip() {
+        return toMap2(appliedSpecList);
+    }
+
+    public String getLastUpdate() {
+        return lastUpdate.toString();
+    }
+
+    public String getLastReceived() {
+        return lastReceived.toString();
+    }
+
+    public Map<String, Map<FeedTrip, Long>> getAppliedTypePerFeedPerTripNumber() {
+        return toMap2Number(appliedSpecList);
+    }
+
+    public void addError(String err) {
+        errorList.add(err);
+    }
+    @JsonIgnore
+    public List<AppliedEntity> getAppliedLastMinutes(int minutes) {
+
+        return getSelected(minutes);
+
+    }
+
+}
+
+class AppliedEntity implements Comparable {
+    @JsonIgnore
+    String type;
+    String feedId;
+    String tripId;
+    @JsonIgnore
+    FeedTrip feedTrip;
+    @JsonIgnore
+    Timestamp timestamp;
+
+    AppliedEntity(String type,
+                  String feedId,
+                  String tripId) {
+        this.type = type;
+        this.feedId = feedId;
+        this.tripId = tripId;
+        this.feedTrip = new FeedTrip(feedId, tripId);
+        this.timestamp = new Timestamp(System.currentTimeMillis());
+    }
+
+    public Timestamp getTimestamp() {
+        return timestamp;
+    }
+
+    public String getTripId() {
+        return tripId;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public String getFeedId() {
+        return feedId;
+    }
+
+    public FeedTrip getFeedTrip() {
+        return feedTrip;
+    }
+
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == this) {
+            return true;
+        }
+        if (o == null) {
+            return false;
+        }
+        if (!(o instanceof AppliedEntity)) {
+            return false;
+        }
+        AppliedEntity ft = (AppliedEntity) o;
+        return ft.getFeedId().equals(this.getFeedId()) && ft.getTripId().equals(this.getTripId()) && ft.getType().equals(this.getType());
+    }
+
+    @Override
+    public int hashCode() {
+        return this.getFeedId().hashCode() * 13 + this.getTripId().hashCode() * 17 + this.getType().hashCode() * 31;
+    }
+
+    @Override
+    public int compareTo(Object T1) {
+
+
+        return 1;
+    }
+
+
+}
+
+class FeedTrip {
+    String feedId;
+    String tripId;
+
+    public FeedTrip(String feedId, String tripId) {
+        this.feedId = feedId;
+        this.tripId = tripId;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == this) {
+            return true;
+        }
+        if (o == null) {
+            return false;
+        }
+        if (!(o instanceof FeedTrip)) {
+            return false;
+        }
+
+        FeedTrip ft = (FeedTrip) o;
+        return ft.getFeedId().equals(this.getFeedId()) && ft.getTripId().equals(this.getTripId());
+    }
+
+    @Override
+    public int hashCode() {
+        return this.getFeedId().hashCode() * 13 + this.getTripId().hashCode() * 17;
+    }
+
+
+    public String getFeedId() {
+        return feedId;
+    }
+
+    public String getTripId() {
+        return tripId;
+    }
+
+    @Override
+    public String toString() {
+        return "feedTrip";
+    }
 }

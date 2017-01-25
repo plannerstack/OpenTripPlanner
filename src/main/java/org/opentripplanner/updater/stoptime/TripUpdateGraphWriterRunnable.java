@@ -13,6 +13,7 @@
 
 package org.opentripplanner.updater.stoptime;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.opentripplanner.routing.graph.Graph;
@@ -40,6 +41,7 @@ public class TripUpdateGraphWriterRunnable implements GraphWriterRunnable {
 
     private final String feedId;
 
+
     public TripUpdateGraphWriterRunnable(final boolean fullDataset, final List<TripUpdate> updates, final String feedId) {
         // Preconditions
         Preconditions.checkNotNull(updates);
@@ -49,6 +51,7 @@ public class TripUpdateGraphWriterRunnable implements GraphWriterRunnable {
         this.fullDataset = fullDataset;
         this.updates = updates;
         this.feedId = feedId;
+
     }
 
     @Override
@@ -60,6 +63,8 @@ public class TripUpdateGraphWriterRunnable implements GraphWriterRunnable {
         } else {
             LOG.error("Could not find realtime data snapshot source in graph."
                     + " The following updates are not applied: {}", updates);
+            snapshotSource.addError("Could not find realtime data snapshot source in graph.");
         }
     }
+
 }
