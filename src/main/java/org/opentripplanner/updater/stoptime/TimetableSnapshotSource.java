@@ -20,15 +20,20 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.BiFunction;
 import java.util.stream.Collector;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import com.fasterxml.jackson.annotation.JsonAutoDetect;
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.introspect.AnnotatedClass;
+import com.fasterxml.jackson.databind.introspect.JacksonAnnotationIntrospector;
+import com.fasterxml.jackson.databind.ser.FilterProvider;
+import com.fasterxml.jackson.databind.ser.impl.SimpleBeanPropertyFilter;
+import com.fasterxml.jackson.databind.ser.impl.SimpleFilterProvider;
+import com.google.common.collect.ImmutableMap;
 import org.apache.lucene.util.fst.PairOutputs;
 import org.geotools.xml.xsi.XSISimpleTypes;
 import org.joda.time.DateTime;
@@ -55,6 +60,10 @@ import com.google.common.base.Preconditions;
 import com.google.transit.realtime.GtfsRealtime.TripDescriptor;
 import com.google.transit.realtime.GtfsRealtime.TripUpdate;
 import com.google.transit.realtime.GtfsRealtime.TripUpdate.StopTimeUpdate;
+
+import javax.ws.rs.GET;
+import javax.ws.rs.Produces;
+import javax.ws.rs.core.MediaType;
 
 /**
  * This class should be used to create snapshots of lookup tables of realtime data. This is
@@ -136,14 +145,19 @@ public class TimetableSnapshotSource {
     private final List<String> typeList = new ArrayList<>();
     private final List<AppliedEntity> appliedSpecList = new ArrayList<>();
 
-    // public static Map<String, AppliedEntity> appliedSpecMap = new HashMap<>();
     public static Map<String, Long> errorMap = new HashMap<>();
     public static Map<String, Long> appliedMap = new HashMap<>();
     public static Map<String, Long> receivedMap = new HashMap<>();
     public static Map<String, Long> typeMap = new HashMap<>();
 
     private static Timestamp lastUpdate;
+    private static String lastUpdatedTrip;
     private static Timestamp lastReceived;
+    private static String lastReceivedTrip;
+    private static int receivedNum = 0;
+    private static int appliedNum = 0;
+    private static Set<String> lastErrors = new HashSet<>();
+
 
     private Runnable runnable;
 
@@ -220,7 +234,6 @@ public class TimetableSnapshotSource {
      * @param feedId
      */
     public void applyTripUpdates(final Graph graph, final boolean fullDataset, final List<TripUpdate> updates, final String feedId) {
-
         if (updates == null) {
             LOG.warn("updates is null");
             return;
@@ -228,7 +241,7 @@ public class TimetableSnapshotSource {
 
         // Acquire lock on buffer
         bufferLock.lock();
-        lastReceived = new Timestamp(System.currentTimeMillis());
+        lastErrors.clear();
         try {
             if (fullDataset) {
                 // Remove all updates from the buffer
@@ -239,8 +252,10 @@ public class TimetableSnapshotSource {
             int uIndex = 0;
 
             for (TripUpdate tripUpdate : updates) {
-
-                receivedList.add(tripUpdate.getTrip().getTripId());
+                receivedNum++;
+                lastReceived = new Timestamp(System.currentTimeMillis());
+                lastReceivedTrip = tripUpdate.getTrip().getTripId();
+                receivedList.add(lastReceivedTrip);
                 if (fuzzyTripMatcher != null && tripUpdate.hasTrip()) {
                     final TripDescriptor trip = fuzzyTripMatcher.match(feedId, tripUpdate.getTrip());
                     tripUpdate = tripUpdate.toBuilder().setTrip(trip).build();
@@ -249,6 +264,7 @@ public class TimetableSnapshotSource {
                 if (!tripUpdate.hasTrip()) {
                     LOG.warn("Missing TripDescriptor in gtfs-rt trip update: \n{}", tripUpdate);
                     errorList.add("Missing TripDescriptor in gtfs-rt trip update:  " + tripUpdate);
+                    lastErrors.add("Missing TripDescriptor in gtfs-rt trip update");
                     continue;
                 }
 
@@ -261,6 +277,7 @@ public class TimetableSnapshotSource {
                     } catch (final ParseException e) {
                         LOG.warn("Failed to parse start date in gtfs-rt trip update: \n{}", tripUpdate);
                         errorList.add("Failed to parse start date in gtfs-rt trip update: " + tripUpdate);
+                        lastErrors.add("Failed to parse start date in gtfs-rt trip update");
                         continue;
                     }
                 } else {
@@ -297,16 +314,18 @@ public class TimetableSnapshotSource {
 
                 if (applied) {
                     appliedBlockCount++;
+                    appliedNum++;
                     lastUpdate = new Timestamp(System.currentTimeMillis());
-                    appliedList.add(tripUpdate.getTrip().getTripId());
+                    lastUpdatedTrip = tripUpdate.getTrip().getTripId();
+                    appliedList.add(lastUpdatedTrip);
                     typeList.add(tripScheduleRelationship.toString());
-                    appliedSpecList.add(new AppliedEntity(tripScheduleRelationship.toString(), feedId, tripUpdate.getTrip().getTripId()));
+                    appliedSpecList.add(new AppliedEntity(tripScheduleRelationship.toString(), feedId, lastUpdatedTrip));
 
                 } else {
                     LOG.warn("Failed to apply TripUpdate.");
                     LOG.trace(" Contents: {}", tripUpdate);
                     errorList.add("Failed to apply TripUpdate. ");// + tripUpdate.getTrip().getTripId() + ".");
-
+                    lastErrors.add("Failed to apply TripUpdate.");
                 }
 
                 if (appliedBlockCount % logFrequency == 0) {
@@ -326,7 +345,9 @@ public class TimetableSnapshotSource {
             } else {
                 getTimetableSnapshot(false);
             }
-
+            /**
+             * Every minute Maps for update statistics are updated
+             */
             if (runnable == null) {
                 runnable = new Runnable() {
                     public void run() {
@@ -362,47 +383,91 @@ public class TimetableSnapshotSource {
      * @param list that represents errors or updates
      * @return Map which will group the same messages, and count the same occurrences
      */
-    static public Map<String, Long> toMap(List<String> list) {
+    static private Map<String, Long> toMap(List<String> list) {
         if (list == null || list.size() == 0)
             return null;
         return list.stream().collect(Collectors.groupingBy(s -> s, Collectors.counting()));
     }
 
-    static public Map<String, Map<FeedTrip, Set<AppliedEntity>>> toMap2(List<AppliedEntity> list) {
+    /**
+     *
+     * @param list
+     * @return map grouped by occurrences of entry in the list
+     */
+    static private Map<Object, Long> toMapObject(List<Object> list) {
         if (list == null || list.size() == 0)
             return null;
-        return list.stream().collect(Collectors.groupingBy(AppliedEntity::getType, Collectors.groupingBy(AppliedEntity::getFeedTrip, Collectors.toSet())));
+        return list.stream().collect(Collectors.groupingBy(s -> s, Collectors.counting()));
     }
 
-    static public Map<String, Map<FeedTrip, Long>> toMap2Number(List<AppliedEntity> list) {
+    /**
+     *
+     * @param list
+     * @return map of applied updates groupedby type, feedid and tripid
+     */
+    static private Map<String, Map<String, Map<String, Long>>> toMap2(List<AppliedEntity> list) {
         if (list == null || list.size() == 0)
             return null;
-        return list.stream().collect(Collectors.groupingBy(AppliedEntity::getType, Collectors.groupingBy(AppliedEntity::getFeedTrip, Collectors.counting())));
+        return list.stream().collect(Collectors.groupingBy(AppliedEntity::getType, Collectors.groupingBy(AppliedEntity::getFeedId, Collectors.groupingBy(AppliedEntity::getTripId, Collectors.counting()))));
+
     }
 
-    static public Map<String, Long> toMap(List<AppliedEntity> list, String type) {
+    /**
+     *
+     * @param list
+     * @param feedId
+     * @param tripId
+     * @return map formed from a list, grouped by occurrences of types per specific feedId and tripId
+     */
+    static private Map<String, Long> toMap2(List<AppliedEntity> list, String feedId, String tripId) {
+        if (feedId == null || tripId == null) {
+             return null;
+        }
+        FeedTrip ft = new FeedTrip(feedId, tripId);
+        BiFunction<FeedTrip, List<AppliedEntity>, List<AppliedEntity>> byFeedTrip =
+                (feedtrip, l) -> l.stream()
+                        .filter(a -> !(a.getFeedTrip().equals(feedtrip)))
+                        .collect(Collectors.toList());
+        return byFeedTrip.apply(ft, list).stream().collect(Collectors.groupingBy(AppliedEntity::getType, Collectors.counting()));
+    }
 
+    /**
+     *
+     * @param list
+     * @param type
+     * @param id
+     * @return Object which is map formed from a list grouped by type if id is null, or
+     * if id not null the value of entry with key id
+     */
+    static private Object toMap(List<AppliedEntity> list, String type, String id) {
         if (list == null || list.size() == 0)
             return null;
+        Map<String, Long> ret;
         switch (type) {
             case "feedId":
-                return list.stream().collect(Collectors.groupingBy(AppliedEntity::getFeedId, Collectors.counting()));
+                ret = list.stream().collect(Collectors.groupingBy(AppliedEntity::getFeedId, Collectors.counting()));
+                break;
             case "tripId":
-                return list.stream().collect(Collectors.groupingBy(AppliedEntity::getTripId, Collectors.counting()));
+                ret = list.stream().collect(Collectors.groupingBy(AppliedEntity::getTripId, Collectors.counting()));
+                break;
             case "type":
-                return list.stream().collect(Collectors.groupingBy(AppliedEntity::getType, Collectors.counting()));
+                ret = list.stream().collect(Collectors.groupingBy(AppliedEntity::getType, Collectors.counting()));
+                break;
             default:
                 LOG.error("Wrong parameter for Generating Map.");
                 return null;
         }
+        if (id == null)
+            return ret;
+        return ret.get(id);
     }
 
     /**
      * @param firstMap
      * @param secondMap
-     * @return Map which will group the same messages, and count the same occurrences
+     * @return Map that is concatenation of two maps grouped by the same messages - key, and count the same occurrences -value in the map
      */
-    static public Map<String, Long> mergeMaps(Map<String, Long> firstMap, Map<String, Long> secondMap) {
+    static private Map<String, Long> mergeMaps(Map<String, Long> firstMap, Map<String, Long> secondMap) {
         if (firstMap == null)
             return secondMap;
         else if (secondMap == null)
@@ -418,6 +483,11 @@ public class TimetableSnapshotSource {
         return result;
     }
 
+    /**
+     * removes all older than number of minutes data from list c
+     * @param c
+     * @param minutes
+     */
     static void removeExpired(List<AppliedEntity> c, long minutes) {
         if (c == null)
             return;
@@ -429,15 +499,20 @@ public class TimetableSnapshotSource {
 
     }
 
+    /**
+     *
+     * @param minutes
+     * @return all applied updates that happened int he last number of minutes
+     */
     @JsonIgnore
-    private List<AppliedEntity> getSelected(int minutes){
+    private List<Object> getSelected(int minutes) {
         if (appliedSpecList == null)
             return null;
-        ArrayList<AppliedEntity> c  = new ArrayList<AppliedEntity>(appliedSpecList);
+        ArrayList<Object> c = new ArrayList<Object>(appliedSpecList);
 
         Timestamp expirationDate = new Timestamp(System.currentTimeMillis() - minutes * 1000 * 60);
 
-        for (Iterator<AppliedEntity> it = c.iterator(); it.hasNext(); )
+        for (Iterator<Object> it = c.iterator(); it.hasNext(); )
             if (((AppliedEntity) it.next()).getTimestamp().before(expirationDate))
                 it.remove();
 
@@ -1149,63 +1224,205 @@ public class TimetableSnapshotSource {
         return stop;
     }
 
-
+    /**
+     *
+     * @return all errors, grouped by their type exposing the number of same occurrences
+     */
     public Map<String, Long> getErrors() {
+
         return errorMap;
     }
 
+    /**
+     *
+     * @return the set of all errors occurring in the last block of updates
+     */
+    @JsonIgnore
+    public Set<String> getLastErrors(){
+        return lastErrors;
+    }
+
+    /**
+     *
+     * @return the number of applied updates per tripId
+     */
     public Map<String, Long> getApplied() {
+
         return appliedMap;
     }
 
+    /**
+     *
+     * @return return the number of received updates er tripId
+     */
     public Map<String, Long> getReceived() {
+
         return receivedMap;
     }
 
+    /**
+     *
+     * @return the number of updates per type
+     */
     public Map<String, Long> getTypes() {
+
         return typeMap;
     }
 
+    /**
+     *
+     * @param feedId
+     * @return the number of applied updates for feedId
+     */
+    @JsonIgnore
+    public Long getAppliedPerFeed(String feedId) {
+        Object ret = toMap(appliedSpecList, "feedId", feedId);
+        if (ret == null)
+            return null;
+        return (Long) ret;
+    }
+
+    /**
+     *
+     * @return the number of applied per feedId
+     */
     public Map<String, Long> getAppliedPerFeed() {
-        return toMap(appliedSpecList, "feedId");
+        Object ret = toMap(appliedSpecList, "feedId", null);
+        if (ret == null)
+            return null;
+        return (Map<String, Long>) ret;
     }
 
+    /**
+     *
+     * @return the number of applied per tripId
+     */
     public Map<String, Long> getAppliedPerTrip() {
-        return toMap(appliedSpecList, "tripId");
+        Object ret = toMap(appliedSpecList, "tripId", null);
+        if (ret == null)
+            return null;
+        return (Map<String, Long>) ret;
     }
 
+    /**
+     *
+     * @return all the number of applied per type
+     */
     public Map<String, Long> getAppliedPerType() {
-        return toMap(appliedSpecList, "type");
+        Object ret = toMap(appliedSpecList, "type", null);
+        if (ret == null)
+            return null;
+        return (Map<String, Long>) ret;
     }
 
-    public Map<String, Map<FeedTrip, Set<AppliedEntity>>> getAppliedTypePerFeedPerTrip() {
+    /**
+     *
+     * @return all applied updates grouped by type, feedId and tripId
+     */
+    public Map<String, Map<String, Map<String, Long>>> getAppliedTypePerFeedPerTrip() {
         return toMap2(appliedSpecList);
     }
 
-    public String getLastUpdate() {
-        return lastUpdate.toString();
+    /**
+     *
+     * @param feedId
+     * @param tripId
+     * @return all applied updates per feedId and tripId, grouped by type exposing the number
+     */
+    @JsonIgnore
+    public Map<String, Long> getAppliedTypePerFeedPerTrip(String feedId, String tripId) {
+        return toMap2(appliedSpecList, feedId, tripId);
+
     }
 
-    public String getLastReceived() {
-        return lastReceived.toString();
+    /**
+     *
+     * @return timestamp last applied updates
+     */
+    private Long getLastApplied() {
+        if (lastUpdate == null)
+            return null;
+        return lastUpdate.getTime();
     }
 
-    public Map<String, Map<FeedTrip, Long>> getAppliedTypePerFeedPerTripNumber() {
-        return toMap2Number(appliedSpecList);
+    /**
+     *
+     * @return timestamp last received updates
+     */
+    private long getLastReceived() {
+
+        if (lastReceived == null)
+            return 0L;
+        return lastReceived.getTime();
     }
 
+    /**
+     *
+     * @return the tripId and timestamp of last applied and received update
+     */
+    public Map<String, Object> getLastAppliedReceived(){
+        Map<String, Object> ret = new HashMap<>();
+        ret.put("lastUpdatedTrip", lastUpdatedTrip);
+        ret.put("lastUpdatedTime", getLastApplied());
+        ret.put("lastReceivedTrip",lastReceivedTrip);
+        ret.put("lastReceivedTime",getLastReceived());
+        return ret;
+    }
+
+    /**
+     *
+     * @return the number of received and applied updates
+     */
+    public Map<String, Integer> getReceivedApplied(){
+        Map<String, Integer> ret = new HashMap<>();
+        ret.put("receivedNum",receivedNum);
+        ret.put("appliedNum",appliedNum);
+        return ret;
+    }
+
+
+    /**
+     * Classes can addErrors if in relation to TripUpdate
+     * @param err
+     */
     public void addError(String err) {
         errorList.add(err);
+        lastErrors.add(err);
     }
+
+    /**
+     *
+     * @param minutes
+     * @return information about all updates occurring in the last number of minutes
+     */
     @JsonIgnore
     public List<AppliedEntity> getAppliedLastMinutes(int minutes) {
 
-        return getSelected(minutes);
+
+        Map<Object, Long> c = toMapObject(getSelected(minutes));
+
+        if (c == null)
+            return null;
+        List<AppliedEntity> ret = new ArrayList<>();
+        int i = 0;
+        AppliedEntity ap;
+        for (Map.Entry<Object, Long> entry : c.entrySet()) {
+            ap = (AppliedEntity) entry.getKey();
+            ap.setOccurrence(entry.getValue());
+            ret.add((AppliedEntity) entry.getKey());
+        }
+        return ret;
 
     }
 
+
+
+
 }
 
+/**
+ * Following classes are helpers while creating Statistics for updates
+ */
 class AppliedEntity implements Comparable {
     @JsonIgnore
     String type;
@@ -1216,6 +1433,16 @@ class AppliedEntity implements Comparable {
     @JsonIgnore
     Timestamp timestamp;
 
+    public Long getOccurrence() {
+        return occurrence;
+    }
+
+    public void setOccurrence(Long occurrence) {
+        this.occurrence = occurrence;
+    }
+
+    Long occurrence;
+
     AppliedEntity(String type,
                   String feedId,
                   String tripId) {
@@ -1224,6 +1451,7 @@ class AppliedEntity implements Comparable {
         this.tripId = tripId;
         this.feedTrip = new FeedTrip(feedId, tripId);
         this.timestamp = new Timestamp(System.currentTimeMillis());
+        this.occurrence = 0L;
     }
 
     public Timestamp getTimestamp() {
@@ -1267,16 +1495,33 @@ class AppliedEntity implements Comparable {
         return this.getFeedId().hashCode() * 13 + this.getTripId().hashCode() * 17 + this.getType().hashCode() * 31;
     }
 
+
     @Override
-    public int compareTo(Object T1) {
+    public int compareTo(Object o) {
+        if (o == this) {
+            return 0;
+        }
+        if (o == null) {
+            return -1;
+        }
+        if (!(o instanceof AppliedEntity)) {
+            return -1;
+        }
+        AppliedEntity ft = (AppliedEntity) o;
+        if (this.getFeedId().compareTo(ft.getFeedId()) == 0)
+            if (this.getTripId().compareTo(ft.getTripId()) == 0)
+                if (this.getType().compareTo(ft.getType()) == 0)
+                    return 0;
+                else
+                    return this.getType().compareTo(ft.getType());
+            else return this.getTripId().compareTo(ft.getTripId());
+        else return this.getFeedId().compareTo(ft.getFeedId());
 
-
-        return 1;
     }
-
 
 }
 
+@JsonTypeInfo(use = JsonTypeInfo.Id.CLASS, include = JsonTypeInfo.As.PROPERTY, property = "@class")
 class FeedTrip {
     String feedId;
     String tripId;
@@ -1316,8 +1561,4 @@ class FeedTrip {
         return tripId;
     }
 
-    @Override
-    public String toString() {
-        return "feedTrip";
-    }
 }

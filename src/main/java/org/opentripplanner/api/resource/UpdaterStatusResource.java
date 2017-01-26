@@ -23,12 +23,15 @@ public class UpdaterStatusResource {
 
     private static final Logger LOG = LoggerFactory.getLogger(UpdaterStatusResource.class);
 
-    /** Choose short or long form of results. */
-    @QueryParam("detail") private boolean detail = false;
+    /**
+     * Choose short or long form of results.
+     */
+    @QueryParam("detail")
+    private boolean detail = false;
 
     Router router;
 
-    public UpdaterStatusResource (@Context OTPServer otpServer, @PathParam("routerId") String routerId) {
+    public UpdaterStatusResource(@Context OTPServer otpServer, @PathParam("routerId") String routerId) {
         router = otpServer.getRouter(routerId);
     }
 
@@ -45,10 +48,13 @@ public class UpdaterStatusResource {
         return Response.status(Response.Status.OK).entity(updaterManager.getDescription()).build();
     }
 
-    /** Return a list of all agencies in the graph. */
+    /**
+     *
+     * @return a list of all agencies in the graph for the given feedId.
+     */
     @GET
     @Path("/agency/{feedId}")
-    public Response getAgencies (@PathParam("feedId") String feedId) {
+    public Response getAgencies(@PathParam("feedId") String feedId) {
         GraphUpdaterManager updaterManager = router.graph.updaterManager;
         if (updaterManager == null) {
             return Response.status(Response.Status.NOT_FOUND).entity("There is no updaters running.").build();
@@ -56,11 +62,13 @@ public class UpdaterStatusResource {
         return Response.status(Response.Status.OK).entity(updaterManager.getAgency(feedId)).build();
     }
 
-    //TODO does not look good
-    /** Return status for a specific updater. */
+    /**
+     *
+     * @return status for a specific updater.
+     */
     @GET
     @Path("/{updaterId}")
-    public Response getTypeOfUpdater (@PathParam("updaterId") int updaterId) {
+    public Response getTypeOfUpdater(@PathParam("updaterId") int updaterId) {
         GraphUpdaterManager updaterManager = router.graph.updaterManager;
         if (updaterManager == null) {
             return Response.status(Response.Status.NOT_FOUND).entity("There are no updaters running.").build();
@@ -68,8 +76,10 @@ public class UpdaterStatusResource {
         return Response.status(Response.Status.OK).entity(updaterManager.getUpdater(updaterId)).build();
     }
 
-
-    //TODO
+    /**
+     *
+     * @return correct and all stream addresses
+     */
     @GET
     @Path("/stream")
     public Response getStreamAddresses() {
@@ -80,7 +90,10 @@ public class UpdaterStatusResource {
         return Response.status(Response.Status.OK).entity(updaterManager.getStreamAddresses()).build();
     }
 
-
+    /**
+     *
+     * @return types of updater
+     */
     @GET
     @Path("/types")
     public Response getTypes() {
@@ -91,17 +104,40 @@ public class UpdaterStatusResource {
         return Response.status(Response.Status.OK).entity(updaterManager.getAllTypes()).build();
     }
 
-    //TODO all updates
+    /**
+     *
+     * @param updaterId
+     * @return type of updater for updaterId
+     */
     @GET
-    @Path("/updates")
-    public Response getUpdates () {
+    @Path("/types/{id}")
+    public Response getTypePerId(@PathParam("id") int updaterId) {
         GraphUpdaterManager updaterManager = router.graph.updaterManager;
         if (updaterManager == null) {
             return Response.status(Response.Status.NOT_FOUND).entity("There are no updaters running.").build();
         }
-        return Response.status(Response.Status.OK).entity(updaterManager.getUpdates()).build();
+        return Response.status(Response.Status.OK).entity(updaterManager.getType(updaterId)).build();
     }
 
+    /**
+     *
+     * @return all updates grouped by tripid,
+     * exposing the number of time tripid showed in updates
+     */
+    @GET
+    @Path("/updates")
+    public Response getUpdates() {
+        GraphUpdaterManager updaterManager = router.graph.updaterManager;
+        if (updaterManager == null) {
+            return Response.status(Response.Status.NOT_FOUND).entity("There are no updaters running.").build();
+        }
+        return Response.status(Response.Status.OK).entity(updaterManager.getReceived()).build();
+    }
+
+    /**
+     *
+     * @return the number of updates per type
+     */
     @GET
     @Path("/updates/types")
     public Response getUpdatesTypes() {
@@ -112,7 +148,10 @@ public class UpdaterStatusResource {
         return Response.status(Response.Status.OK).entity(updaterManager.getUpdatesTypes()).build();
     }
 
-    //TODO
+    /**
+     *
+     * @return the number of updates applied per tripId
+     */
     @GET
     @Path("/updates/applied")
     public Response getApplied() {
@@ -123,6 +162,11 @@ public class UpdaterStatusResource {
         return Response.status(Response.Status.OK).entity(updaterManager.getApplied()).build();
     }
 
+    /**
+     *
+     * @return the errors for updates grouped by its String representation
+     * exposing the number of occurrences for each error
+     */
     @GET
     @Path("/updates/errors")
     public Response getErrors() {
@@ -133,40 +177,57 @@ public class UpdaterStatusResource {
         return Response.status(Response.Status.OK).entity(updaterManager.getErrors()).build();
     }
 
+    /**
+     *
+     * @return the errors for last block of updates
+     */
     @GET
-    @Path("/updates/received")
-    public Response getReceived() {
+    @Path("/updates/errors/last")
+    public Response getLastErrors() {
         GraphUpdaterManager updaterManager = router.graph.updaterManager;
         if (updaterManager == null) {
             return Response.status(Response.Status.NOT_FOUND).entity("There are no updaters running.").build();
         }
-        return Response.status(Response.Status.OK).entity(updaterManager.getReceived()).build();
+        return Response.status(Response.Status.OK).entity(updaterManager.getLastErrors()).build();
     }
 
+    /**
+     *
+     * @return time and tripId for the last received and applied update
+     */
     @GET
-    @Path("/updates/received/last")
-    public Response getLastReceived() {
+    @Path("/updates/last")
+    public Response getLastAppliedReceived() {
         GraphUpdaterManager updaterManager = router.graph.updaterManager;
         if (updaterManager == null) {
             return Response.status(Response.Status.NOT_FOUND).entity("There are no updaters running.").build();
         }
-        return Response.status(Response.Status.OK).entity(updaterManager.getLastReceived()).build();
+        return Response.status(Response.Status.OK).entity(updaterManager.getLastAppliedReceived()).build();
     }
 
+    /**
+     *
+     * @return the ratio between received and applied update
+     */
     @GET
-    @Path("/updates/updated/last")
-    public Response getLastUpdated() {
+    @Path("/updates/ratio")
+    public Response getReceivedApplied() {
         GraphUpdaterManager updaterManager = router.graph.updaterManager;
         if (updaterManager == null) {
             return Response.status(Response.Status.NOT_FOUND).entity("There are no updaters running.").build();
         }
-        return Response.status(Response.Status.OK).entity(updaterManager.getLastApplied()).build();
+        return Response.status(Response.Status.OK).entity(updaterManager.getReceivedApplied()).build();
     }
 
-    //TODO
+    /**
+     *
+     * @param feedId
+     * @param tripId
+     * @return the number of updates for feedId and tripId grouped by type
+     */
     @GET
-    @Path("/feed/{feedId}/trip/{tripId}")
-    public Response getUpdatesPerFeed (@PathParam("feedId") int feedId, @PathParam ("tripId") int tripId) {
+    @Path("/updates/applied/feed/{feedId}/trip/{tripId}")
+    public Response getUpdatesPerFeedPerTrip(@PathParam("feedId") String feedId, @PathParam("tripId") String tripId) {
         GraphUpdaterManager updaterManager = router.graph.updaterManager;
         if (updaterManager == null) {
             return Response.status(Response.Status.NOT_FOUND).entity("There are no updaters running.").build();
@@ -174,10 +235,14 @@ public class UpdaterStatusResource {
         return Response.status(Response.Status.OK).entity(updaterManager.getTypeAppliedPerFeedPerTrip(feedId, tripId)).build();
     }
 
-    //TODO
+    /**
+     *
+     * @param feedId
+     * @return the number of updates applied for feedId
+     */
     @GET
-    @Path("applied/feed/{feedId}")
-    public Response getAppliedPerFeed(@PathParam("feedId") int feedId) {
+    @Path("/updates/applied/feed/{feedId}")
+    public Response getAppliedPerFeed(@PathParam("feedId") String feedId) {
         GraphUpdaterManager updaterManager = router.graph.updaterManager;
         if (updaterManager == null) {
             return Response.status(Response.Status.NOT_FOUND).entity("There are no updaters running.").build();
@@ -185,9 +250,14 @@ public class UpdaterStatusResource {
         return Response.status(Response.Status.OK).entity(updaterManager.getAppliedPerFeed(feedId)).build();
     }
 
-
+    /**
+     *
+     * @param minutes
+     * @return information about updates that occurred
+     * in the last number of minutes
+     */
     @GET
-    @Path("applied/{lastMinutes}")
+    @Path("updates/applied/{lastMinutes}")
     public Response getAppliedLastMinutes(@PathParam("lastMinutes") int minutes) {
         GraphUpdaterManager updaterManager = router.graph.updaterManager;
         if (updaterManager == null) {
@@ -195,9 +265,4 @@ public class UpdaterStatusResource {
         }
         return Response.status(Response.Status.OK).entity(updaterManager.getAppliedLastMinutes(minutes)).build();
     }
-
-
-
-
-
 }

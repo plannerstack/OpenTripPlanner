@@ -17,6 +17,7 @@ import com.amazonaws.util.json.JSONException;
 import com.amazonaws.util.json.JSONObject;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.google.common.collect.Maps;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 
@@ -192,7 +193,7 @@ public class GraphUpdaterManager {
     }
 
     private Future<?> executeReturningFuture(final GraphWriterRunnable runnable) {
-        // TODO: check for high water mark?  kada ostane mnogo praznih polja posle brisanja 14841
+        // TODO: check for high water mark?
         Future<?> future = scheduler.submit(new Runnable() {
             @Override
             public void run() {
@@ -213,8 +214,6 @@ public class GraphUpdaterManager {
     }
 
     /**
-     * Just an example of fetching status information from the graph updater manager to expose it in a web service.
-     * More useful stuff should be added later.
      * @return All stream addresses
      */
     private Map<Integer, String> getAllStreamAddresses() {
@@ -231,47 +230,29 @@ public class GraphUpdaterManager {
      * @return correct and all stream addresses
      */
     public String getStreamAddresses() {
-        try {
             Map<String, Object> combined = new HashMap<>();
             combined.put("Correct stream addresses", graph.getCorrectStreamAddresses());
             combined.put("All stream addresses", getAllStreamAddresses());
-            return mapper.writeValueAsString(combined);
-        } catch (JsonProcessingException e) {
-            e.printStackTrace();
-            return "Something went wrong with Json.";
-        }
+            return callMapper(combined);
     }
 
     /**
-     *
-     * @return most of the important data
+     * @return most of the important statistical data
      */
-    //TODO 14841 Extract ObjectMapper related code to one method
     public String getDescription() {
         TimetableSnapshotSource snap = graph.timetableSnapshotSource;
-        try {
-            return mapper.writeValueAsString(snap);
-        } catch (JsonProcessingException e) {
-            e.printStackTrace();
-            return "Something went wrong with Json.";
-        }
+        return callMapper(snap);
     }
 
-
     /**
-     * Just an example of fetching status information from the graph updater manager to expose it in a web service.
-     * More useful stuff should be added later.
+     * @param id
+     * @return Description of GraphUpdater for id
      */
     public String getUpdater(int id) {
         String ret = "Updater does not exist.";
         if (id < updaterList.size())
             ret = updaterList.get(id).toString();
-        try {
-            return mapper.writeValueAsString(ret);
-        } catch (JsonProcessingException e) {
-            e.printStackTrace();
-            return "Something went wrong with Json.";
-        }
+        return callMapper(ret);
     }
 
     /**
@@ -282,13 +263,7 @@ public class GraphUpdaterManager {
         GraphUpdater updater = null;
         if (id < updaterList.size())
             updater = updaterList.get(id);
-
-        try {
-            return mapper.writeValueAsString(updater==null?"No updater.":updater.getClass().toString());
-        } catch (JsonProcessingException e) {
-            e.printStackTrace();
-            return "Something went wrong with Json.";
-        }
+        return callMapper(updater == null ? "No updater." : updater.getClass().toString());
     }
 
     /**
@@ -299,138 +274,116 @@ public class GraphUpdaterManager {
         int i = 0;
         for (GraphUpdater up : updaterList)
             retVal.put(i++, up.getClass().getName());
-        try {
-            return mapper.writeValueAsString(retVal);
-        } catch (JsonProcessingException e) {
-            e.printStackTrace();
-            return "Something went wrong with Json.";
-        }
+        return callMapper(retVal);
     }
 
-
     /**
-     * @return all received updates
+     * @return the number of all received updates per tripId
      */
     public String getReceived() {
         TimetableSnapshotSource snap = graph.timetableSnapshotSource;
-        try {
-            return mapper.writeValueAsString(snap.getReceived());
-        } catch (JsonProcessingException e) {
-            e.printStackTrace();
-            return "Something went wrong with Json.";
-        }
+        return callMapper(snap.getReceived());
     }
 
     /**
-     * @return all applied updates
+     * @return the number of all applied updates per tripId
      */
-
     public String getApplied() {
         TimetableSnapshotSource snap = graph.timetableSnapshotSource;
-        try {
-            return mapper.writeValueAsString(snap.getApplied());
-        } catch (JsonProcessingException e) {
-            e.printStackTrace();
-            return "Something went wrong with Json.";
-        }
+        return callMapper(snap.getApplied());
     }
 
     /**
-     * @return all non-applied updates
+     * @return error for non applied update
      */
-
     public String getErrors() {
         TimetableSnapshotSource snap = graph.timetableSnapshotSource;
-        try {
-            return mapper.writeValueAsString(snap.getErrors());
-        } catch (JsonProcessingException e) {
-            e.printStackTrace();
-            return "Something went wrong with Json.";
-        }
+        return callMapper(snap.getErrors());
     }
 
+    /**
+     * @return errors for last update block
+     */
+    public String getLastErrors() {
+        TimetableSnapshotSource snap = graph.timetableSnapshotSource;
+        return callMapper(snap.getLastErrors());
+    }
+
+    /**
+     * @return the number of updates per each type
+     */
     public String getUpdatesTypes() {
         TimetableSnapshotSource snap = graph.timetableSnapshotSource;
-        try {
-            return mapper.writeValueAsString(snap.getTypes());
-        } catch (JsonProcessingException e) {
-            e.printStackTrace();
-            return "Something went wrong with Json.";
-        }
-
+        return callMapper(snap.getTypes());
     }
 
-    //TODO 14841 String representation of time
-    public String getLastApplied() {
+    /**
+     * @return the timestamp in milliseconds for last applied and received updates and their trip id
+     */
+    public String getLastAppliedReceived() {
         TimetableSnapshotSource snap = graph.timetableSnapshotSource;
-        try {
-            return mapper.writeValueAsString(snap.getLastUpdate());
-        } catch (JsonProcessingException e) {
-            e.printStackTrace();
-            return "Something went wrong with Json.";
-        }
-
+        return callMapper(snap.getLastAppliedReceived());
     }
 
-    //TODO 14841
-    public String getLastReceived() {
-
+    /**
+     * @return the ratio of received and applied updates
+     */
+    public String getReceivedApplied(){
         TimetableSnapshotSource snap = graph.timetableSnapshotSource;
-        try {
-            return mapper.writeValueAsString(snap.getLastReceived());
-        } catch (JsonProcessingException e) {
-            e.printStackTrace();
-            return "Something went wrong with Json.";
-        }
-
+        return callMapper(snap.getReceivedApplied());
     }
 
-
-    //TODO 14841
-    public List<String> getAppliedPerFeed(int feedId) {
-        return null;
+    /**
+     * @param feedId
+     * @return the number of updates per provided feedId
+     * all updates older than @see TimetableSnapshotSource 60 minutes are discarded.
+     */
+    public String getAppliedPerFeed(String feedId) {
+        TimetableSnapshotSource snap = graph.timetableSnapshotSource;
+        return callMapper(snap.getAppliedPerFeed(feedId));
     }
 
-    //TODO 14841 what is tripId
-    public List<String> getTypeAppliedPerFeedPerTrip(int feedId, int tripId) {
-        return null;
+    /**
+     * @param feedId
+     * @param tripId
+     * @return the number of updates grouped by type per feedId and triId
+     * all updates older than @see TimetableSnapshotSource 60 minutes are discarded.
+     */
+    public String getTypeAppliedPerFeedPerTrip(String feedId, String tripId) {
+        TimetableSnapshotSource snap = graph.timetableSnapshotSource;
+        return callMapper(snap.getAppliedTypePerFeedPerTrip(feedId, tripId));
     }
 
-    //TODO 14841 what is stream
-    public List<String> getTotalPerStream() {
-        return null;
-    }
-
-    //TODO 14841 think of something
-    public List<String> getSomethingNew() {
-
-
-        return null;
-    }
-
-    //TODO 14841
-    public String getUpdates() {
-        return null;
-    }
-
-
-    //TODO 14841
+    /**
+     * @param feedId
+     * @return the description of agency for feedId
+     */
     public String getAgency(String feedId) {
-        try {
-            return mapper.writeValueAsString(graph.getAgencies(feedId));
-        } catch (JsonProcessingException e) {
-            e.printStackTrace();
-            return "Something went wrong with Json.";
-        }
+        return callMapper(graph.getAgencies(feedId));
     }
 
+    /**
+     * @param minutes
+     * @return all updates that happened in the last number of minutes
+     * all updates older than @see TimetableSnapshotSource 60 minutes are discarded.
+     */
     public String getAppliedLastMinutes(int minutes) {
         TimetableSnapshotSource snap = graph.timetableSnapshotSource;
+        return callMapper(snap.getAppliedLastMinutes(minutes));
+    }
+
+    /**
+     * @param o any object
+     * @return String representation of an Object in Json format
+     */
+    private String callMapper(Object o) {
         try {
-            return mapper.writeValueAsString(snap.getAppliedLastMinutes(minutes));
+            return mapper.writeValueAsString(o);
         } catch (JsonProcessingException e) {
             e.printStackTrace();
             return "Something went wrong with Json.";
         }
     }
+
+
 }
