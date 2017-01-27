@@ -1,9 +1,7 @@
 package org.opentripplanner.api.resource;
 
-import com.google.transit.realtime.GtfsRealtime;
 import org.opentripplanner.standalone.OTPServer;
 import org.opentripplanner.standalone.Router;
-import org.opentripplanner.updater.GraphUpdater;
 import org.opentripplanner.updater.GraphUpdaterManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,13 +29,22 @@ public class UpdaterStatusResource {
 
     Router router;
 
+    /**
+     *
+     * @param otpServer
+     * @param routerId id of the router
+     */
     public UpdaterStatusResource(@Context OTPServer otpServer, @PathParam("routerId") String routerId) {
         router = otpServer.getRouter(routerId);
     }
 
     /**
      *
-     * @return most of the important data calculated by TimetableSnapshotSource
+     * Returns view of the important data on real time status updates.
+     *
+     * @return general information about updates(errors of the updates, types
+     * of updates, received and applied updates)
+     *
      */
     @GET
     public Response getDescription() {
@@ -50,21 +57,27 @@ public class UpdaterStatusResource {
 
     /**
      *
-     * @return a list of all agencies in the graph for the given feedId.
+     * Returns all agencies for specific feed.
+     * @param feedId id of the feed
+     * @return a list of all agencies in the graph for the specific feed,
+     * if such exist otherwise return null
      */
     @GET
     @Path("/agency/{feedId}")
     public Response getAgencies(@PathParam("feedId") String feedId) {
         GraphUpdaterManager updaterManager = router.graph.updaterManager;
         if (updaterManager == null) {
-            return Response.status(Response.Status.NOT_FOUND).entity("There is no updaters running.").build();
+            return Response.status(Response.Status.NOT_FOUND).entity("There are no updaters running.").build();
         }
         return Response.status(Response.Status.OK).entity(updaterManager.getAgency(feedId)).build();
     }
 
     /**
      *
-     * @return status for a specific updater.
+     * Returns information on specific updater.
+     * @param updaterId id of the updater
+     * @return Description for the updater with updater id.
+     * If such does not exist "Updater does not exist." is reported.
      */
     @GET
     @Path("/{updaterId}")
@@ -78,7 +91,9 @@ public class UpdaterStatusResource {
 
     /**
      *
-     * @return correct and all stream addresses
+     * Returns information on stream addresses.
+     * @return set of all correct stream addresses and list of information on all
+     * stream addresses.
      */
     @GET
     @Path("/stream")
@@ -92,7 +107,8 @@ public class UpdaterStatusResource {
 
     /**
      *
-     * @return types of updater
+     * Returns types of updaters.
+     * @return a list of all types of updaters
      */
     @GET
     @Path("/types")
@@ -106,8 +122,10 @@ public class UpdaterStatusResource {
 
     /**
      *
-     * @param updaterId
-     * @return type of updater for updaterId
+     * Returns short information on the updater.
+     * @param updaterId id of the updater
+     * @return type of updater for updater id,
+     * if such does not exist "No updater." is reported
      */
     @GET
     @Path("/types/{id}")
@@ -121,8 +139,9 @@ public class UpdaterStatusResource {
 
     /**
      *
-     * @return all updates grouped by tripid,
-     * exposing the number of time tripid showed in updates
+     * Returns a list of received updates.
+     * @return all updates grouped by trip id,
+     * exposing the number of times each trip was updated
      */
     @GET
     @Path("/updates")
@@ -136,7 +155,7 @@ public class UpdaterStatusResource {
 
     /**
      *
-     * @return the number of updates per type
+     * Returns the number of updates per type.
      */
     @GET
     @Path("/updates/types")
@@ -149,8 +168,8 @@ public class UpdaterStatusResource {
     }
 
     /**
-     *
-     * @return the number of updates applied per tripId
+     * Returns the number of applied updates.
+     * @return the number of applied updates grouped by trip id
      */
     @GET
     @Path("/updates/applied")
@@ -163,8 +182,8 @@ public class UpdaterStatusResource {
     }
 
     /**
-     *
-     * @return the errors for updates grouped by its String representation
+     * Returns errors that occurred for non-applied updates.
+     * @return errors for updates grouped by its string representation
      * exposing the number of occurrences for each error
      */
     @GET
@@ -178,8 +197,8 @@ public class UpdaterStatusResource {
     }
 
     /**
-     *
-     * @return the errors for last block of updates
+     * Returns errors that occurred for last block of non-applied updates.
+     * @return errors for the last block of updates
      */
     @GET
     @Path("/updates/errors/last")
@@ -193,7 +212,9 @@ public class UpdaterStatusResource {
 
     /**
      *
-     * @return time and tripId for the last received and applied update
+     *  Returns information on the last updated trip.
+     * @return time when update occurred, id of the trip being updated for
+     * each last received and last applied update
      */
     @GET
     @Path("/updates/last")
@@ -207,7 +228,8 @@ public class UpdaterStatusResource {
 
     /**
      *
-     * @return the ratio between received and applied update
+     * Returns the ratio between received and applied updates.
+     * @return the number of received and applied updates
      */
     @GET
     @Path("/updates/ratio")
@@ -220,10 +242,10 @@ public class UpdaterStatusResource {
     }
 
     /**
-     *
-     * @param feedId
-     * @param tripId
-     * @return the number of updates for feedId and tripId grouped by type
+     * Returns the number of applied updates for feed and trip.
+     * @param feedId id of the feed
+     * @param tripId id of the trip
+     * @return the number of updates for specific feed and trip, grouped by type
      */
     @GET
     @Path("/updates/applied/feed/{feedId}/trip/{tripId}")
@@ -236,9 +258,9 @@ public class UpdaterStatusResource {
     }
 
     /**
-     *
-     * @param feedId
-     * @return the number of updates applied for feedId
+     * Returns the number of applied updates for provided feed.
+     * @param feedId id of the feed
+     * @return the number of applied updates for specific feed
      */
     @GET
     @Path("/updates/applied/feed/{feedId}")
@@ -251,10 +273,9 @@ public class UpdaterStatusResource {
     }
 
     /**
-     *
-     * @param minutes
-     * @return information about updates that occurred
-     * in the last number of minutes
+     * Returns the information on applied updates not older than provided parameter.
+     * @param minutes the number of minutes (all updates older than 60 minutes are discarded)
+     * @return information about applied updates that occurred in the last number of minutes
      */
     @GET
     @Path("updates/applied/{lastMinutes}")
