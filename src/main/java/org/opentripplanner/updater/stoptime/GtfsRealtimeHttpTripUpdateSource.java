@@ -46,6 +46,7 @@ public class GtfsRealtimeHttpTripUpdateSource implements TripUpdateSource, JsonC
     private String feedId;
 
     private String url;
+    Graph graph;
 
     @Override
     public void configure(Graph graph, JsonNode config) throws Exception {
@@ -53,6 +54,7 @@ public class GtfsRealtimeHttpTripUpdateSource implements TripUpdateSource, JsonC
         if (url == null) {
             throw new IllegalArgumentException("Missing mandatory 'url' parameter");
         }
+        this.graph = graph;
         this.url = url;
         this.feedId = config.path("feedId").asText();
     }
@@ -69,7 +71,7 @@ public class GtfsRealtimeHttpTripUpdateSource implements TripUpdateSource, JsonC
                 // Decode message
                 feedMessage = FeedMessage.PARSER.parseFrom(is);
                 feedEntityList = feedMessage.getEntityList();
-                
+
                 // Change fullDataset value if this is an incremental update
                 if (feedMessage.hasHeader()
                         && feedMessage.getHeader().hasIncrementality()
@@ -77,7 +79,8 @@ public class GtfsRealtimeHttpTripUpdateSource implements TripUpdateSource, JsonC
                                 .equals(GtfsRealtime.FeedHeader.Incrementality.DIFFERENTIAL)) {
                     fullDataset = false;
                 }
-                
+                graph.addCorrectStreamAddress(url);
+
                 // Create List of TripUpdates
                 updates = new ArrayList<TripUpdate>(feedEntityList.size());
                 for (FeedEntity feedEntity : feedEntityList) {
@@ -86,6 +89,7 @@ public class GtfsRealtimeHttpTripUpdateSource implements TripUpdateSource, JsonC
             }
         } catch (Exception e) {
             LOG.warn("Failed to parse gtfs-rt feed from " + url + ":", e);
+            graph.timetableSnapshotSource.addError("Failed to parse gtfs-rt feed from " + url);
         }
         return updates;
     }

@@ -9,7 +9,7 @@ otp.config = {
 
     //This is default locale when wanted locale isn't found
     //Locale language is set based on wanted language in url >
-    //user cookie > language set in browser (Not accept-language) 
+    //user cookie > language set in browser (Not accept-language)
     locale: otp.locale.English,
 
     //All avalible locales
@@ -19,7 +19,6 @@ otp.config = {
     locales : {
         'en': otp.locale.English,
         'de': otp.locale.German,
-        'pl': otp.locale.Polish,
         'sl': otp.locale.Slovenian,
         'fr': otp.locale.French,
         'it': otp.locale.Italian,
@@ -45,7 +44,8 @@ otp.config = {
     /**
      * The OTP web service locations
      */
-    hostname : "",
+    // Hostname will be set dependent on window.location.hostname at the bottom of this file
+    hostname : null,
     //municoderHostname : "http://localhost:8080",
     //datastoreUrl : 'http://localhost:9000',
     // In the 0.10.x API the base path is "otp-rest-servlet/ws"
@@ -55,7 +55,7 @@ otp.config = {
 
     /**
      * Base layers: the base map tile layers available for use by all modules.
-     * Expressed as an array of objects, where each object has the following 
+     * Expressed as an array of objects, where each object has the following
      * fields:
      *   - name: <string> a unique name for this layer, used for both display
      *       and internal reference purposes
@@ -64,7 +64,7 @@ otp.config = {
      *   - attribution: <string> the attribution text for the map tile data
      *   - [subdomains]: <array of strings> a list of tileUrl subdomains, if
      *       applicable
-     *       
+     *
      */
 
     baseLayers: [
@@ -100,19 +100,19 @@ otp.config = {
             attribution : 'Map data and tiles © OpenStreetMap contributors'
         }
     ],
-    
+
 
     /**
      * Map start location and zoom settings: by default, the client uses the
-     * OTP routerInfo API call to center and zoom the map. The following
+     * OTP metadata API call to center and zoom the map. The following
      * properties, when set, override that behavioir.
      */
-     
+
     // initLatLng : new L.LatLng(<lat>, <lng>),
     // initZoom : 14,
     // minZoom : 10,
     // maxZoom : 20,
-    
+
     /* Whether the map should be moved to contain the full itinerary when a result is received. */
     zoomToFitResults    : false,
 
@@ -120,7 +120,7 @@ otp.config = {
      * Site name / description / branding display options
      */
 
-    siteName            : "My OTP Instance",
+    siteName            : "Plannerstack OTP Instance",
     siteDescription     : "An OpenTripPlanner deployment.",
     logoGraphic         : 'images/otp_logo_darkbg_40px.png',
     // bikeshareName    : "",
@@ -130,7 +130,7 @@ otp.config = {
     showLogo            : true,
     showTitle           : true,
     showModuleSelector  : true,
-    metric              : false,
+    metric              : true,
 
 
     /**
@@ -144,7 +144,7 @@ otp.config = {
      *   - [isDefault]: <boolean> whether this module is shown by default;
      *       should only be 'true' for one module
      */
-    
+
     modules : [
         {
             id : 'planner',
@@ -157,8 +157,8 @@ otp.config = {
             className : 'otp.modules.analyst.AnalystModule'
         }
     ],
-    
-    
+
+
     /**
      * Geocoders: a list of supported geocoding services available for use in
      * address resolution. Expressed as an array of objects, where each object
@@ -172,25 +172,26 @@ otp.config = {
 
     geocoders : [
         {
-            name: 'OTP built-in geocoder',
-            className: 'otp.core.GeocoderBuiltin'
-            // URL and query parameter do not need to be set for built-in geocoder.
+            name: 'BAG geocoder',
+            className: 'otp.core.GeocoderBag',
+            url: 'http://demo.bag42.plannerstack.org/api/v0/geocode/json',
+            addressParam: 'address'
         }
     ],
 
-    
+
 
     //This is shown if showLanguageChooser is true
     infoWidgetLangChooser : {
-        title: '<img src="/images/language_icon.svg" onerror="this.onerror=\'\';this.src=\'/images/language_icon.png\'" width="30px" height="30px"/>', 
+        title: '<img src="/images/language_icon.svg" onerror="this.onerror=\'\';this.src=\'/images/language_icon.png\'" width="30px" height="30px"/>',
         languages: true
     },
-    
-    
+
+
     /**
      * Support for the "AddThis" display for sharing to social media sites, etc.
      */
-     
+
     showAddThis     : false,
     //addThisPubId    : 'your-addthis-id',
     //addThisTitle    : 'Your title for AddThis sharing messages',
@@ -198,26 +199,26 @@ otp.config = {
 
     /**
      * Formats to use for date and time displays, expressed as ISO-8601 strings.
-     */    
-     
+     */
+
     timeFormat  : "h:mma",
     dateFormat  : "MMM Do YYYY"
 
 };
 var options = {
-	resGetPath: 'js/otp/locale/__lng__.json',
-	fallbackLng: 'en',
+       	resGetPath: 'js/otp/locale/__lng__.json',
+       	fallbackLng: 'en',
         nsseparator: ';;', //Fixes problem when : is in translation text
         keyseparator: '_|_',
-	preload: ['en'],
+       	preload: ['en'],
         //TODO: Language choosing works only with this disabled
         /*lng: otp.config.locale_short,*/
         /*postProcess: 'add_nekaj', //Adds | around every string that is translated*/
         /*shortcutFunction: 'sprintf',*/
         /*postProcess: 'sprintf',*/
-	debug: true,
-	getAsync: false, //TODO: make async
-	fallbackOnEmpty: true,
+       	debug: true,
+       	getAsync: false, //TODO: make async
+       	fallbackOnEmpty: true,
 };
 var _tr = null; //key
 var ngettext = null; // singular, plural, value
@@ -234,7 +235,7 @@ i18n.init(options, function(t) {
         otp.config.locale = otp.config.locales[i18n.lng()];
         otp.config.metric = otp.config.locale.config.metric;
         //Conditionally load datepicker-lang.js?
-    } 
+    }
 
     //Use infoWidgets from locale
     //Default locale is English which has infoWidgets
@@ -259,7 +260,7 @@ i18n.init(options, function(t) {
         //Only key
         if (arg_length == 1) {
             key = arguments[0];
-            return t(key); 
+            return t(key);
         //key with sprintf values
         } else if (arg_length > 1) {
             key = arguments[0];
@@ -267,7 +268,7 @@ i18n.init(options, function(t) {
             for(var i = 1; i < arg_length; i++) {
                 values.push(arguments[i]);
             }
-            return t(key, {postProcess: 'sprintf', sprintf: values}); 
+            return t(key, {postProcess: 'sprintf', sprintf: values});
         } else {
             console.error("_tr function doesn't have an argument");
             return "";
@@ -291,16 +292,13 @@ i18n.init(options, function(t) {
 otp.config.modes = {
     //TRANSLATORS: Travel by: mode of transport (Used in selection in Travel
     //Options widgets)
-        "TRANSIT,WALK"        : _tr("Transit"), 
+        "TRANSIT,WALK"        : _tr("Transit"),
     //TRANSLATORS: Travel by: mode of transport (Used in selection in Travel
     //Options widgets)
-        "BUS,WALK"         : _tr("Bus Only"), 
+        "BUSISH,WALK"         : _tr("Bus Only"),
     //TRANSLATORS: Travel by: mode of transport (Used in selection in Travel
     //Options widgets)
-        "TRAM,RAIL,SUBWAY,FUNICULAR,GONDOLA,WALK"       : _tr("Rail Only"), 
-    //TRANSLATORS: Travel by: mode of transport (Used in selection in Travel
-    //Options widgets)
-        "AIRPLANE,WALK"       : _tr("Airplane Only"),
+        "RAIL,WALK"       : _tr("Rail Only"),
     //TRANSLATORS: Travel by: mode of transport (Used in selection in Travel
     //Options widgets)
         "BICYCLE"             : _tr('Bicycle Only'),
@@ -334,3 +332,50 @@ otp.config.modes = {
     //Options widgets)
     //    'TRANSIT,WALK,BICYCLE_RENT': _tr('Transit & Rented Bicycle')
     };
+
+
+
+/**
+    Plannerstack dynamic config adjustment 1
+    Fix for setting otp.config.hostname dependent on window.location.hostname for REST API
+ */
+var default_hostname = "//demo.planner.plannerstack.org";
+var hostname_mapping = {
+    // production
+    "planner.plannerstack.org": "//planner.plannerstack.org",
+    "planner.plannerstack.com": "//planner.plannerstack.com",
+    // demo servers
+    "demo.planner.plannerstack.org": default_hostname,
+    "demo.planner.plannerstack.com": default_hostname,
+    "opentripplanner.nl": default_hostname,
+    // build server
+    "10.42.2.12": "//10.42.2.12:9050",
+    // Acceptation server
+    "91.240.240.130": "//91.240.240.130:9050",
+    "10.42.2.11": "//10.42.2.11:9050"
+};
+
+otp.config["hostname"] = hostname_mapping[window.location.hostname];
+
+if (!otp.config["hostname"]) {
+    otp.config["hostname"] = default_hostname;
+    console.error("[ERROR] : This domain is not registered as a valid hostname to run a OTP client within the Plannerstack environment. \n  No hostname found in hostname_mapping, falling back to default_hostname \n  Edit ot.config.js inside the https://bitbucket.org/calendar42/plannerstack-scripts/");
+}
+
+
+/**
+    Plannerstack dynamic config adjustment 2
+    Fix for having multiple routers, allows setting the desired otp.config.restService by setting:
+    ?router=otp/routers/cyclenetwork
+ */
+function getParameterByName(name) {
+    name = name.replace(/[\[]/, "\\[").replace(/[\]]/, "\\]");
+    var regex = new RegExp("[\\?&]" + name + "=([^&#]*)"),
+        results = regex.exec(location.search);
+    return results === null ? "" : decodeURIComponent(results[1].replace(/\+/g, " "));
+}
+var router = getParameterByName("router");
+if (router && router.length > 0) {
+    console.info("[INFO] : Setting router based on URL parameter");
+    otp.config.restService = router;
+}
